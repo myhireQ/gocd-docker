@@ -1,0 +1,53 @@
+# Build using: docker build -f Dockerfile.gocd-agent-myhireq -t gocd-agent-myhireq .
+FROM phusion/baseimage:0.9.17
+MAINTAINER Afam Agbodike <afam@pomello.com>
+
+
+RUN apt-get update && \
+    apt-get install -y -q \
+    unzip openjdk-7-jre-headless git build-essential curl \
+    zlib1g-dev libssl-dev libreadline-dev libyaml-dev libxml2-dev \
+    sqlite3 libsqlite3-dev \
+    libxslt-dev libcurl4-openssl-dev libffi-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN mkdir /etc/service/go-agent
+COPY gocd-agent/go-agent-start.sh /etc/service/go-agent/run
+
+#ADD http://download.go.cd/gocd-deb/go-agent-15.2.0-2248.deb /tmp/go-agent.deb
+COPY ./go-agent-15.2.0-2248.deb /tmp/go-agent.deb
+
+WORKDIR /tmp
+RUN dpkg -i /tmp/go-agent.deb
+RUN sed -i 's/DAEMON=Y/DAEMON=N/' /etc/default/go-agent
+
+USER go
+#BEGIN FROM tcnksm "https://github.com/tcnksm"
+# Install rbenv and ruby-build
+ENV RBENV_ROOT=/var/go/.rbenv
+RUN git clone https://github.com/sstephenson/rbenv.git $RBENV_ROOT
+RUN git clone https://github.com/sstephenson/ruby-build.git $RBENV_ROOT/plugins/ruby-build
+RUN PREFIX="/var/go/.rbenv" $RBENV_ROOT/plugins/ruby-build/install.sh
+ENV PATH $RBENV_ROOT/shims:$RBENV_ROOT/bin:$PATH
+RUN RBENV_ROOT=$RBENV_ROOT echo "PATH=$RBENV_ROOT/bin:$PATH" >> ~/.bashrc
+RUN echo 'eval "$(rbenv init -)"' >> ~/.bashrc
+
+# Install multiple versions of ruby
+ENV CONFIGURE_OPTS --disable-install-doc
+COPY ./versions.txt /tmp/
+RUN xargs -L 1 rbenv install < /tmp/versions.txt
+RUN rbenv rehash
+
+# Install Bundler for each version of ruby
+RUN echo 'gem: --no-rdoc --no-ri' >> ~/.gemrc
+
+#rbenv shims path is not set for the gem install command. There's probably a better way to do this
+RUN for v in $(cat /tmp/versions.txt); do rbenv global $v; gem install bundler; rbenv rehash; done
+
+USER root
+CMD ["/sbin/my_init"]
+
+# TODO:
+# ADD gocd config file into the go directory
+#     the config file does not yet exist, so it will need to be added into the
+#     config after the container is started
